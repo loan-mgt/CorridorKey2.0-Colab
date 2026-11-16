@@ -99,6 +99,7 @@ inside each notebook. Open it only when you need it.
 | --- | --- |
 | **Model precision** | **INT8 ConvRot** (default, ~1.0 GB) or **FP32** (official, 2.66 GB). INT8 is the low-RAM CUDA path; FP32 may OOM on a T4. |
 | **Resolution cap** | Photo: `max_long_side` defaults to `2048`. Video: `downscale` offers `Original`, `1080p`, or `720p`. Lower resolution is the strongest OOM fix. |
+| **Color hint picker** | Optional opt-in cell: click the background color to generate a soft hint matte. It guides the model; it is not a hard chroma key. Use hint quality 0.5–0.75. |
 | **Memory mode** | Video: `Lowest RAM (1/1)`, `T4 safe (4/2)`, `Balanced (8/4)`, `Auto (24GB+ VRAM)`, or `Manual`. All low-VRAM modes use staged inference and chunked attention/MLP. |
 | **First-frame matte** | Upload a black/white matte (white = subject) to tell the model exactly what to track. Usually the best practical mode. |
 | **Full hint video** | Provide a matte for every frame, for maximum control. Must match the processed resolution and length. |
@@ -111,6 +112,23 @@ inside each notebook. Open it only when you need it.
 
 The notebooks also include a collapsible parameter reference with the same
 explanations, plus troubleshooting notes.
+
+### Optional color hint
+
+Both notebooks include an **opt-in** color-picker cell. It is off by default, so
+the normal “Run all” flow is unchanged.
+
+When enabled:
+- Click the background color in the preview image.
+- Adjust tolerance, cleanup, and feather.
+- The cell writes a black/white hint matte and passes it through the existing
+  first-frame hint path.
+- Photo: the matte is used for the still.
+- Video: the matte is generated from the first frame and the model tracks it.
+- Use hint quality `0.5–0.75` for a rough color mask.
+
+This is a **guide**, not a deterministic chroma key. For a hard color removal,
+a traditional keyer is still the right tool.
 
 ## Model choices and the MLX Q8 question
 
@@ -186,6 +204,7 @@ Colab.
 | Log / ACES / HDR footage | Convert upstream to display-coded sRGB/Rec.709. The runtime does not convert Log/PQ/HLG/ACES automatically. |
 | INT8 edges differ from FP32 | W8A8 quantization can change localized alpha. Switch to **FP32** and lower the resolution/window if quality is more important than memory. |
 | `cannot import name 'PreTrainedModel'` / C-RADIO import error | The setup cell now pins `transformers==4.57.6`, `tokenizers==0.22.2`, `huggingface_hub==0.36.2`, `safetensors==0.8.0`, and `timm==1.0.30`. Re-run setup with `force_reinstall = True`. Do not install the old `requirements.txt` on Colab Python 3.13; its `numpy<2` pin is incompatible. |
+| Color hint preview is not clickable | Re-run setup so `ipyevents` and `ipywidgets` are installed. If it still does not respond, use the color picker widget below the preview, or restart the runtime and re-run setup. |
 | Setup patch fails | The notebook pins the official repo and INT8 loader commits. If upstream changed, use the pinned commits or update the patch. |
 | Badge opens a 404 | Make sure this repository is public and that the default branch is `main`. If it is `master`, replace `main` with `master` in the badge URLs. |
 
@@ -211,6 +230,11 @@ Colab.
 The photo notebook wraps the uploaded image as a one-frame directory because the
 official CLI accepts a video or a frame directory, not a single image. The video
 notebook preserves the original audio and muxes it back into a separate file.
+
+Both notebooks also have an optional color-hint cell. It is off by default. When
+enabled, it generates a black/white matte from a clicked background color and
+feeds it to the existing first-frame hint path. For video, only the first frame
+is colored-keyed; the model carries the hint through the clip.
 
 ## License and credits
 
