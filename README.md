@@ -153,6 +153,12 @@ Colab.
   model copy peaks around 5 GB; INT8 cuts that roughly in half. The notebooks
   keep the kernel light by checking PyTorch in a subprocess and print peak child
   RAM after inference.
+- **Python 3.13 dependencies:** the setup cell pins `transformers==4.57.6`,
+  `tokenizers==0.22.2`, `huggingface_hub==0.36.2`, `safetensors==0.8.0`, and
+  `timm==1.0.30`, and installs `numpy>=2.1`. It does not use the old
+  `requirements.txt` `numpy<2` pin, which is not compatible with Colab's
+  Python 3.13. Critical packages are installed with `--no-deps` so CUDA PyTorch
+  is not replaced.
 - **Scratch space:** low-VRAM feature memmaps go to `/content/ck_temp` by
   default, not `/tmp`. Long clips can use several GB there. Check the free disk
   printed by the GPU cell.
@@ -179,6 +185,7 @@ Colab.
 | The preview will not play | The inline preview is a short H.264 transcode. The full transparent output is ProRes 4444; import it into an editor. |
 | Log / ACES / HDR footage | Convert upstream to display-coded sRGB/Rec.709. The runtime does not convert Log/PQ/HLG/ACES automatically. |
 | INT8 edges differ from FP32 | W8A8 quantization can change localized alpha. Switch to **FP32** and lower the resolution/window if quality is more important than memory. |
+| `cannot import name 'PreTrainedModel'` / C-RADIO import error | The setup cell now pins `transformers==4.57.6`, `tokenizers==0.22.2`, `huggingface_hub==0.36.2`, `safetensors==0.8.0`, and `timm==1.0.30`. Re-run setup with `force_reinstall = True`. Do not install the old `requirements.txt` on Colab Python 3.13; its `numpy<2` pin is incompatible. |
 | Setup patch fails | The notebook pins the official repo and INT8 loader commits. If upstream changed, use the pinned commits or update the patch. |
 | Badge opens a 404 | Make sure this repository is public and that the default branch is `main`. If it is `master`, replace `main` with `master` in the badge URLs. |
 
@@ -187,7 +194,10 @@ Colab.
 1. Clone the official `nikopueringer/CorridorKey2.0` repository at a pinned
    commit.
 2. Install the tested CUDA PyTorch (`torch==2.9.1`, `torchvision==0.24.1`) and
-   the project requirements.
+   pin the C-RADIO/Transformers stack (`transformers==4.57.6`,
+   `tokenizers==0.22.2`, `huggingface_hub==0.36.2`, `safetensors==0.8.0`,
+   `timm==1.0.30`). Critical packages are installed with `--no-deps` so the
+   CUDA PyTorch build is not replaced.
 3. Add the CUDA **INT8 ConvRot** loader, patch `runtime.py` to install the
    quantized linears, and apply the autocast dtype/T4 float16 fixes.
 4. Download the **INT8 checkpoint** and the three frozen foundation models
