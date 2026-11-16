@@ -16,7 +16,13 @@ with Niko and Corridor Digital.
 
 Upload a photo or a video, click **Run all**, and get the foreground back with
 a real alpha channel. The notebooks handle the repository clone, the CUDA
-PyTorch install, the ~5 GB of model weights, inference, previews, and downloads.
+PyTorch install, the low-RAM **INT8 checkpoint**, the foundation models,
+inference, previews, and downloads.
+
+> **Free T4 friendly.** The default path uses the community **INT8 ConvRot**
+> checkpoint (about **1.0 GB** instead of 2.66 GB) plus staged low-VRAM
+> inference. This is the only practical way to run large photos and 4K clips on
+> a free Colab GPU.
 
 | Notebook | Input | Output | Launch |
 | --- | --- | --- | --- |
@@ -28,7 +34,7 @@ PyTorch install, the ~5 GB of model weights, inference, previews, and downloads.
 ```mermaid
 flowchart LR
     A[Upload a photo or video] --> B[Run all]
-    B --> C[Clone repo + install CUDA PyTorch + download weights]
+    B --> C[Clone repo + install CUDA PyTorch + add INT8 + download models]
     C --> D[Run CorridorKey 2.0]
     D --> E[Transparent PNG or ProRes 4444 .mov]
 ```
@@ -40,14 +46,16 @@ flowchart LR
 3. When the file picker appears, upload your photo or video.
 4. When inference finishes, download the result from the last cell.
 
-The first run installs PyTorch and downloads the weights (about 10–15 minutes).
-Later runs in the same Colab session skip the finished steps. There is only one
-upload prompt in the default flow — advanced options are optional.
+The first run installs PyTorch, downloads the **~1.0 GB INT8 checkpoint** and the
+foundation models (about 10–15 minutes). Later runs in the same Colab session
+skip the finished steps. There is only one upload prompt in the default flow —
+advanced options are optional.
 
 > **GPU required.** In Colab, use **Runtime → Change runtime type → Hardware
-> accelerator → GPU**. A free T4 can run the notebooks through an experimental
-> float16 compatibility patch; an A100 or L4 runtime is recommended for longer
-> videos and production work.
+> accelerator → GPU**. A free T4 works with the INT8 path and the automatic
+> float16 compatibility patch. The default memory mode is **T4 safe (4/2)**;
+> use **Lowest RAM (1/1)** for 4K or long clips. An A100 or L4 runtime is
+> recommended for production work and full-resolution FP32.
 
 ## What you get
 
@@ -89,59 +97,105 @@ inside each notebook. Open it only when you need it.
 
 | Control | What it does |
 | --- | --- |
+| **Model precision** | **INT8 ConvRot** (default, ~1.0 GB) or **FP32** (official, 2.66 GB). INT8 is the low-RAM CUDA path; FP32 may OOM on a T4. |
+| **Resolution cap** | Photo: `max_long_side` defaults to `2048`. Video: `downscale` offers `Original`, `1080p`, or `720p`. Lower resolution is the strongest OOM fix. |
+| **Memory mode** | Video: `Lowest RAM (1/1)`, `T4 safe (4/2)`, `Balanced (8/4)`, `Auto (24GB+ VRAM)`, or `Manual`. All low-VRAM modes use staged inference and chunked attention/MLP. |
 | **First-frame matte** | Upload a black/white matte (white = subject) to tell the model exactly what to track. Usually the best practical mode. |
 | **Full hint video** | Provide a matte for every frame, for maximum control. Must match the processed resolution and length. |
 | **Hint quality** | How much to trust the hint: `0.95` clean artist matte, `0.75` rough mask, `<=0.5` loose hint. |
 | **Carry hint** | Reuse the model's own overlapping-window predictions as a continuing hint. Disable it to make a full hint video authoritative. |
 | **Despill strength** | Remove green/blue spill from the cutout: `0` none, `1` full (default `0.5`). |
-| **Memory mode** | Auto, force low-VRAM, or manual Hann window (`hann_chunk` / `hann_stride`). |
 | **Frame limit** | `0` processes the entire video; otherwise process the first N frames or a middle segment. |
-| **720p processing** | Process a downscaled copy for speed. The output matches the downscaled size. |
+| **Smoke test** | Process one frame first to check memory, then turn it off for the full clip. |
 | **Audio** | Mux the original audio back into a separate `_cutout_with_audio.mov`. |
 
 The notebooks also include a collapsible parameter reference with the same
 explanations, plus troubleshooting notes.
 
+## Model choices and the MLX Q8 question
+
+There are three different things people often mix up:
+
+| Option | Where it runs | Size | Use on Colab? |
+| --- | --- | --- | --- |
+| Official **FP32** checkpoint | PyTorch + CUDA | 2.66 GB | Yes, but needs more RAM/VRAM |
+| Community **INT8 ConvRot** checkpoint | PyTorch + CUDA | ~1.0 GB | **Yes — default here** |
+| `peterteravskis/corridorkey-v2-mlx` **FP32/FP16/Q8** | Apple Silicon + MLX/Metal | varies | **No — MLX has no CUDA backend** |
+
+The MLX project is an excellent Apple Silicon port, but it cannot run on a
+Colab NVIDIA GPU. Its Q8 files are in MLX format and are not loadable by the
+PyTorch runtime. The CUDA equivalent used here is
+[`boricuapab/corridorkey_v2_int8_convrot`](https://huggingface.co/boricuapab/corridorkey_v2_int8_convrot):
+W8A8, group-256 ConvRot, **167 quantized linear layers**, and native
+`torch._int_mm` CUDA matmul. It is downloaded at runtime; the weights are not
+redistributed by this repository.
+
+INT8 changes numerical results, especially localized alpha. If quality matters
+more than memory, select **FP32** and lower the resolution/window. The MLX Q8
+path is weight-only and may behave differently, but it is not an option on
+Colab.
+
 ## Hardware and runtime notes
 
-- **NVIDIA GPU required.** The model does not run on CPU or TPU.
-- **T4 (free Colab):** works via a local float16 patch applied automatically by
-  the setup cell, because T4/Turing lacks native bfloat16. This is experimental
-  and slow. If you see a CUDA error, switch to an A100/L4 runtime.
-- **A100 / L4 (Colab Pro):** recommended for long clips and 4K footage.
-- **VRAM:** the runtime measures free GPU memory and selects a Hann window and
-  low-VRAM mode automatically. If you hit an out-of-memory error, use
-  **Force low VRAM**, manual `8/4` or `4/2` windows, or enable 720p processing.
+- **NVIDIA GPU required.** The model does not run on CPU or TPU. INT8 CUDA
+  matmul needs compute capability 7.5+ (T4, L4, A100, or newer).
+- **T4 (free Colab):** use the default **INT8 + T4 safe (4/2)** settings. The
+  setup cell applies a local float16 patch because T4/Turing lacks native
+  bfloat16. For 4K or long clips, switch to **Lowest RAM (1/1)** and/or
+  `downscale = 720p`. If you see a CUDA error, switch to an A100/L4 runtime.
+- **A100 / L4 (Colab Pro):** recommended for long clips, FP32, and 4K. You can
+  use `Auto (24GB+ VRAM)` or `Balanced (8/4)`.
+- **VRAM:** the old “Force low VRAM” behaviour was a trap: it kept the 80/40
+  window and could use *more* memory. The notebook now always passes an
+  explicit `hann_chunk` with `--low_vram`. Use **Lowest RAM (1/1)** if you still
+  OOM, then lower the resolution.
+- **System RAM:** a free T4 has about 12.7 GB. The FP32 checkpoint plus its
+  model copy peaks around 5 GB; INT8 cuts that roughly in half. The notebooks
+  keep the kernel light by checking PyTorch in a subprocess and print peak child
+  RAM after inference.
+- **Scratch space:** low-VRAM feature memmaps go to `/content/ck_temp` by
+  default, not `/tmp`. Long clips can use several GB there. Check the free disk
+  printed by the GPU cell.
 - **Long videos:** the entire clip is processed by default. Free Colab sessions
   can time out, and a disconnect erases `/content`. Download results promptly.
-  The advanced settings can trim the clip or downscale it.
+  Use `smoke_test`, `max_frames`, or `downscale` for long clips.
 - **No Google Drive integration.** This keeps the default flow to one upload
-  prompt. Save the downloads before the session ends.
+  prompt. Save the downloads before the session ends. The Colab upload widget
+  loads the whole file into memory, so upload shorter sections for multi-GB
+  clips.
 
 ## Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
 | No GPU / "requires a CUDA GPU" | Runtime → Change runtime type → GPU, then re-run the check cell. |
-| CUDA out of memory | Advanced settings → **Force low VRAM**, or manual `8/4` / `4/2`; enable 720p; reduce frames. |
-| Very slow on a T4 | Use A100/L4, enable 720p processing, or test with fewer frames. |
+| CUDA out of memory | Keep **INT8**. Video: **Lowest RAM (1/1)** + `720p`. Photo: `max_long_side = 2048` (or 1536). Reduce `max_frames`. Restart the runtime after a hard OOM. |
+| Session crashed / system RAM OOM | This is not CUDA OOM. Restart the runtime, re-run setup, keep INT8, use `smoke_test`, and process a shorter clip. The upload widget itself can use a lot of RAM for multi-GB files. |
+| Very slow on a T4 | Use A100/L4, set `downscale = 720p`, or test with `smoke_test` / fewer frames. |
 | Colab asks to restart after installing PyTorch | You can ignore the banner: inference runs in a fresh subprocess. If you do restart, re-run from the GPU check. |
 | The subject is wrong or drifts | Upload a first-frame matte (white = subject, black = background), then re-run. |
 | Green/blue spill on edges | Increase **despill strength**, and use a cleaner matte. |
 | Rotated phone video | The upload cell detects rotation metadata and creates an auto-rotated copy. If it still looks wrong, enable **normalize video**. |
 | The preview will not play | The inline preview is a short H.264 transcode. The full transparent output is ProRes 4444; import it into an editor. |
 | Log / ACES / HDR footage | Convert upstream to display-coded sRGB/Rec.709. The runtime does not convert Log/PQ/HLG/ACES automatically. |
+| INT8 edges differ from FP32 | W8A8 quantization can change localized alpha. Switch to **FP32** and lower the resolution/window if quality is more important than memory. |
+| Setup patch fails | The notebook pins the official repo and INT8 loader commits. If upstream changed, use the pinned commits or update the patch. |
 | Badge opens a 404 | Make sure this repository is public and that the default branch is `main`. If it is `master`, replace `main` with `master` in the badge URLs. |
 
 ## How the notebooks work
 
-1. Clone the official `nikopueringer/CorridorKey2.0` repository.
+1. Clone the official `nikopueringer/CorridorKey2.0` repository at a pinned
+   commit.
 2. Install the tested CUDA PyTorch (`torch==2.9.1`, `torchvision==0.24.1`) and
    the project requirements.
-3. Download the CorridorKey weights and the three frozen foundation models
-   (C-RADIO, MoGe-2, RVM) into `weights/` and `vfms/`.
-4. Run the official `infer.py` CLI with the selected mode and outputs.
-5. Extract the transparent result from the model's `cutout` output, build
+3. Add the CUDA **INT8 ConvRot** loader, patch `runtime.py` to install the
+   quantized linears, and apply the autocast dtype/T4 float16 fixes.
+4. Download the **INT8 checkpoint** and the three frozen foundation models
+   (C-RADIO, MoGe-2, RVM) into `weights/` and `vfms/`. FP32 is downloaded on
+   demand only if selected.
+5. Run the official `infer.py` CLI with the selected precision, low-VRAM mode,
+   resolution, and outputs.
+6. Extract the transparent result from the model's `cutout` output, build
    previews, and offer download links.
 
 The photo notebook wraps the uploaded image as a one-frame directory because the
@@ -171,6 +225,13 @@ CorridorKey builds on three frozen foundation models:
 - **C-RADIO** by NVIDIA — NVIDIA Open Model License
 - **MoGe** by Microsoft — MIT
 - **RVM** by Google DeepMind — code Apache 2.0, weights CC-BY 4.0
+
+The optional INT8 ConvRot checkpoint is a community conversion by
+**boricuapab** ([`boricuapab/corridorkey_v2_int8_convrot`](https://huggingface.co/boricuapab/corridorkey_v2_int8_convrot)).
+The loader is from [`boricuapab/ck2-mask-webui`](https://github.com/boricuapab/ck2-mask-webui).
+The notebooks download these at runtime; the model weights are not
+redistributed by this repository. Keep the original CorridorKey license and
+attribution.
 
 See [THIRD_PARTY_NOTICES.md](https://github.com/nikopueringer/CorridorKey2.0/blob/master/THIRD_PARTY_NOTICES.md)
 for details.
